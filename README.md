@@ -3,7 +3,7 @@
 
 An automated interaction bot for Kite AI platform with multi-wallet and proxy support.
 
-## Register 
+## Register
 
 - (https://testnet.gokite.ai?r=nmtN7225)
 
@@ -17,24 +17,33 @@ An automated interaction bot for Kite AI platform with multi-wallet and proxy su
 - Usage reporting
 - Graceful error handling
 
-## 📋 Prerequisites
+## 👋 Prerequisites
 
 - Node.js (v16 or higher)
 - npm (Node Package Manager)
 
-## 🛠️ Installation
+## 🛠️ Installation (Updated)
 
-1. Clone the repository:
+1. **Clone the repository:**
 ```bash
 git clone https://github.com/hamad0786/gokite-ai
-```
-```bash
 cd gokite-ai
 ```
 
-2. Install dependencies:
+2. **Install latest npm & dependencies:**
 ```bash
+npm install -g npm@latest
 npm install
+```
+
+3. **Check npm version (optional):**
+```bash
+npm -v
+```
+
+4. **Run the bot:**
+```bash
+npm run start
 ```
 
 ## 📝 Configuration
@@ -61,7 +70,7 @@ npm install
 "How do gas fees work in Ethereum?",  
 "What is the difference between a coin and a token?",  
 "How does blockchain ensure transparency and security?",  
-"What industries can benefit from blockchain technology?",
+"What industries can benefit from blockchain technology?"
 ]
 ```
 
@@ -106,6 +115,7 @@ https://t.me/HAMAD_ALPHA
 
 This bot is for educational purposes only. Use at your own risk and ensure compliance with Kite AI's terms of service.
 
-## 📜 License
+## 🐟 License
 
 MIT License - feel free to use and modify for your own purposes.
+
