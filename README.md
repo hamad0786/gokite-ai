@@ -1,108 +1,111 @@
-# Kite AI Auto-Bot
+# gokite-ai
+
+## Kite AI Auto-Bot
 
 An automated interaction bot for the Kite AI platform with multi-wallet and proxy support.
 
-## 🚀 Features
+## Register
 
-- **Multiple Wallet Support** (manual input or file-based)
-- **Proxy Support** (HTTP/HTTPS/SOCKS)
-- **Rate Limiting and Retry Mechanisms**
-- **Multiple AI Agents Interaction**
-- **Automatic Question Selection**
-- **Usage Reporting**
-- **Graceful Error Handling**
-- **Daily Limit: 30 Questions per Wallet (Auto-Reset in 24 Hours)**
-- **Message Delay: 5 Minutes Between Each Question**
+- [Sign up here](https://testnet.gokite.ai?r=nmtN7225)
 
-## 📋 Prerequisites
+## 🌟 Features
 
-- **Node.js** (v16 or higher)
-- **npm** (Node Package Manager)
+- Multiple wallet support (manual input or file-based)
+- Proxy support (HTTP/HTTPS/SOCKS)
+- Rate limiting and retry mechanisms
+- Multiple AI agents interaction
+- Automatic question selection
+- Usage reporting
+- Graceful error handling
+- **Automated messaging with a delay of 5 minutes per message**
+- **Each wallet can send a maximum of 30 messages per 24 hours**
 
-## 🛠️ Installation
+## 👌 Prerequisites
 
-1. **Clone the repository:**
+- Node.js (v16 or higher)
+- npm (Node Package Manager)
 
-```sh
-git clone https://github.com/hamad0786/gokite-ai
-cd gokite-ai
-```
+## 🧐 Installation
 
-2. **Install dependencies:**
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/hamad0786/gokite-ai
+   ```
+   ```bash
+   cd gokite-ai
+   ```
 
-```sh
-npm install
-```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
 ## 📝 Configuration
 
-### 1. Create a `questions.json` file with your questions:
+1. Create a `questions.json` file with your questions:
+   ```json
+   [
+     "What is cryptocurrency?",
+     "How does Bitcoin work?",
+     "What is Ethereum?",
+     "How are NFTs related to blockchain?",
+     "What is DeFi (Decentralized Finance)?",
+     "How does a blockchain transaction work?",
+     "What are the benefits of blockchain technology?",
+     "What is a private blockchain?",
+     "How does proof-of-work (PoW) differ from proof-of-stake (PoS)?",
+     "What is a crypto wallet?"
+   ]
+   ```
 
-```json
-[
-  "What is cryptocurrency?",
-  "How does Bitcoin work?",
-  "What is Ethereum?",
-  "How are NFTs related to blockchain?",
-  "What is DeFi (Decentralized Finance)?",
-  "How does a blockchain transaction work?",
-  "What are the benefits of blockchain technology?",
-  "What is a private blockchain?",
-  "How does proof-of-work (PoW) differ from proof-of-stake (PoS)?",
-  "What is a crypto wallet?"
-]
-```
+2. (Optional) Create a `proxies.txt` file for proxy support:
+   ```
+   http://user:pass@host:port
+   socks5://user:pass@host:port
+   ```
 
-### 2. (Optional) Create a `proxies.txt` file for proxy support:
-
-```sh
-http://user:pass@host:port
-socks5://user:pass@host:port
-```
-
-### 3. Create a `wallets.txt` file for multiple wallets:
-
-```sh
-0x1234567890abcdef1234567890abcdef12345678
-0xabcdef1234567890abcdef1234567890abcdef12
-```
-
-### 4. (Optional) Modify settings in `bot.js`:
-
-- `MAX_QUESTIONS_PER_DAY = 30` (Adjust daily question limit per wallet)
-- `MESSAGE_DELAY = 5 * 60 * 1000` (Change delay between each question)
+3. Create a `wallets.txt` file for multiple wallets:
+   ```bash
+   nano wallets.txt
+   ```
+   Add wallet addresses in the file:
+   ```
+   0x1234567890abcdef1234567890abcdef12345678
+   0xabcdef1234567890abcdef1234567890abcdef12
+   ```
 
 ## 🚀 Usage
 
 Run the bot:
-
-```sh
+```bash
 npm run start
 ```
 
 The bot will prompt you to:
-
-1. **Choose connection mode** (Direct/Proxy)
-2. **Choose wallet input mode** (Manual/File)
-3. **Enter wallet address** (if manual mode)
+1. Choose connection mode (Direct/Proxy)
+2. Choose wallet input mode (Manual/File)
+3. Enter wallet address (if manual mode)
 
 ## ⚙️ Configuration Options
 
-- **Rate Limiting:** Prevents exceeding limits
-- **Agents:** Modify available AI agents
-- **Interval Between Cycles:** Change delay between interaction cycles
+You can modify the following settings in `index.js`:
+
+- `rateLimitConfig`: Adjust rate limiting parameters
+- `agents`: Modify available AI agents
+- `intervalBetweenCycles`: Change delay between interaction cycles
+- **Message delay is set to 5 minutes per message**
+- **Each wallet can send a maximum of 30 messages per 24 hours**
 
 ## 📢 Support
 
 Join our Telegram channel for updates and support:
-
-👉 [https://t.me/HAMAD_ALPHA](https://t.me/HAMAD_ALPHA)
+[HAMAD_ALPHA Telegram](https://t.me/HAMAD_ALPHA)
 
 ## ⚠️ Disclaimer
 
-This bot is for **educational purposes only**. Use at your own risk and ensure compliance with Kite AI's terms of service.
+This bot is for educational purposes only. Use at your own risk and ensure compliance with Kite AI's terms of service.
 
-## 📜 License
+## 🐟 License
 
 MIT License - feel free to use and modify for your own purposes.
 
