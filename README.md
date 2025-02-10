@@ -29,7 +29,7 @@ An automated interaction bot for Kite AI platform with multi-wallet and proxy su
 git clone https://github.com/hamad0786/gokite-ai
 ```
 ```bash
-cd Kite-Ai
+cd gokite-ai
 ```
 
 2. Install dependencies:
