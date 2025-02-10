@@ -17,7 +17,7 @@ An automated interaction bot for the Kite AI platform with multi-wallet and prox
 - Automatic question selection
 - Usage reporting
 - Graceful error handling
-- **Automated messaging with a delay of 2 minutes per message**
+- **Automated messaging with a delay of 1 minute per message**
 - **Each wallet can send a maximum of 30 messages per 24 hours**
 
 ## 👌 Prerequisites
@@ -25,7 +25,7 @@ An automated interaction bot for the Kite AI platform with multi-wallet and prox
 - Node.js (v16 or higher)
 - npm (Node Package Manager)
 
-## 🤨 Installation
+## 🙂 Installation
 
 1. Clone the repository:
    ```bash
@@ -93,10 +93,10 @@ You can modify the following settings in `index.js`:
 - `rateLimitConfig`: Adjust rate limiting parameters
 - `agents`: Modify available AI agents
 - `intervalBetweenCycles`: Change delay between interaction cycles
-- **Message delay is set to 2 minutes per message**
+- **Message delay is set to 1 minute per message**
 - **Each wallet can send a maximum of 30 messages per 24 hours**
 
-## 📝 Support
+## 💙 Support
 
 Join our Telegram channel for updates and support:
 [HAMAD_ALPHA Telegram](https://t.me/HAMAD_ALPHA)
