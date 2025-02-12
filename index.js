@@ -1,334 +1,462 @@
-// Import dependencies
+import fetch from 'node-fetch';
 import chalk from 'chalk';
-import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import { createInterface } from 'readline';
+import readline from 'readline';
+import fs from 'fs/promises';
+import { banner } from './banner.js';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { HttpProxyAgent } from 'http-proxy-agent';
-import axios from 'axios';
-import fs from 'fs';
-import { banner } from './banner.js';
 
-const require = createRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const readline = createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
-
-// Rate Limiting Configuration
-const rateLimitConfig = {
-  maxRetries: 5,
-  baseDelay: 2000,
-  maxDelay: 10000,
-  requestsPerMinute: 15,
-  intervalBetweenCycles: 15000,
-  walletVerificationRetries: 3
-};
-
-let lastRequestTime = Date.now();
-let isRunning = true;
-
-// Handle CTRL+C to gracefully stop the script
-process.on('SIGINT', () => {
-  console.log(chalk.yellow('\n\n🛑 Stopping the script gracefully...'));
-  isRunning = false;
-  setTimeout(() => {
-    console.log(chalk.green('👋 Thank you for using Kite AI!'));
-    process.exit(0);
-  }, 1000);
-});
-
-const agents = {
-  "deployment_p5J9lz1Zxe7CYEoo0TZpRVay": "Professor 🧠",
-  "deployment_7sZJSiCqCNDy9bBHTEh7dwd9": "Crypto Buddy 💰",
-  "deployment_SoFftlsf9z4fyA3QCHYkaANq": "Sherlock 🔎"
-};
-
-const proxyConfig = {
-  enabled: false,
-  current: 'direct',
-  proxies: []
-};
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-const calculateDelay = (attempt) => {
-  return Math.min(
-    rateLimitConfig.maxDelay,
-    rateLimitConfig.baseDelay * Math.pow(2, attempt)
-  );
-};
-
-// Modified to use correct endpoint and handle specific error cases
-async function verifyWallet(wallet) {
-  try {
-    // Skip wallet verification and proceed with usage reporting
-    return true;
-  } catch (error) {
-    console.log(chalk.yellow('⚠️ Proceeding without wallet verification...'));
-    return true;
-  }
-}
-
-const checkRateLimit = async () => {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
-  const minimumInterval = (60000 / rateLimitConfig.requestsPerMinute);
-
-  if (timeSinceLastRequest < minimumInterval) {
-    const waitTime = minimumInterval - timeSinceLastRequest;
-    await sleep(waitTime);
-  }
-  
-  lastRequestTime = Date.now();
-};
-
-function loadProxiesFromFile() {
-  try {
-    const proxyList = fs.readFileSync('proxies.txt', 'utf-8')
-      .split('\n')
-      .filter(line => line.trim())
-      .map(proxy => proxy.trim());
-    proxyConfig.proxies = proxyList;
-    console.log(chalk.green(`✅ Successfully loaded ${proxyList.length} proxies from file`));
-  } catch (error) {
-    console.log(chalk.yellow('⚠️ proxies.txt not found or empty. Using direct connection.'));
-  }
-}
-
-function getNextProxy() {
-  if (!proxyConfig.enabled || proxyConfig.proxies.length === 0) {
-    return null;
-  }
-  const proxy = proxyConfig.proxies.shift();
-  proxyConfig.proxies.push(proxy);
-  return proxy;
-}
-
-function createProxyAgent(proxyUrl) {
-  try {
-    if (!proxyUrl) return null;
-
-    if (proxyUrl.startsWith('socks')) {
-      return new SocksProxyAgent(proxyUrl);
-    } else if (proxyUrl.startsWith('http')) {
-      return {
-        https: new HttpsProxyAgent(proxyUrl),
-        http: new HttpProxyAgent(proxyUrl)
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error(chalk.red(`⚠️ Error creating proxy agent: ${error.message}`));
-    return null;
-  }
-}
-
-function createAxiosInstance(proxyUrl = null) {
-  const config = {
-    headers: { 'Content-Type': 'application/json' }
-  };
-
-  if (proxyUrl) {
-    const proxyAgent = createProxyAgent(proxyUrl);
-    if (proxyAgent) {
-      if (proxyAgent.https) {
-        config.httpsAgent = proxyAgent.https;
-        config.httpAgent = proxyAgent.http;
-      } else {
-        config.httpsAgent = proxyAgent;
-        config.httpAgent = proxyAgent;
-      }
-    }
-  }
-
-  return axios.create(config);
-}
-
-function displayAppTitle() {
-  console.log(banner);
-  console.log(chalk.dim('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-  console.log(chalk.yellow('Made with ❣️ by: HAMAD                   '));
-  console.log(chalk.dim('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
-}
-
-async function sendRandomQuestion(agent, axiosInstance) {
-  try {
-    await checkRateLimit();
-    
-    const randomQuestions = JSON.parse(fs.readFileSync('questions.json', 'utf-8'));
-    const randomQuestion = randomQuestions[Math.floor(Math.random() * randomQuestions.length)];
-
-    const payload = { message: randomQuestion, stream: false };
-    const response = await axiosInstance.post(
-      `https://${agent.toLowerCase().replace('_','-')}.stag-vxzy.zettablock.com/main`,
-      payload
-    );
-
-    return { question: randomQuestion, response: response.data.choices[0].message };
-  } catch (error) {
-    console.error(chalk.red('⚠️ Error:'), error.response ? error.response.data : error.message);
-    return null;
-  }
-}
-
-async function reportUsage(wallet, options, retryCount = 0) {
-  try {
-    await checkRateLimit();
-
-    const payload = {
-      wallet_address: wallet,
-      agent_id: options.agent_id,
-      request_text: options.question,
-      response_text: options.response,
-      request_metadata: {}
-    };
-
-    await axios.post(`https://quests-usage-dev.prod.zettablock.com/api/report_usage`, payload, {
-      headers: { 'Content-Type': 'application/json' }
+const waitForKeyPress = async () => {
+    process.stdin.setRawMode(true);
+    return new Promise(resolve => {
+        process.stdin.once('data', () => {
+            process.stdin.setRawMode(false);
+            resolve();
+        });
     });
+};
 
-    console.log(chalk.green('✅ Usage data reported successfully!\n'));
-  } catch (error) {
-    const isRateLimit = error.response?.data?.error?.includes('Rate limit exceeded');
-    
-    if (isRateLimit && retryCount < rateLimitConfig.maxRetries) {
-      const delay = calculateDelay(retryCount);
-      console.log(chalk.yellow(`⏳ Rate limit detected, retrying in ${delay/1000} seconds...`));
-      await sleep(delay);
-      return reportUsage(wallet, options, retryCount + 1);
+async function loadWallets() {
+    try {
+        const data = await fs.readFile('wallets.txt', 'utf8');
+        const wallets = data.split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('#'));
+        
+        if (wallets.length === 0) {
+            throw new Error('No wallets found in wallets.txt');
+        }
+        return wallets;
+    } catch (err) {
+        console.log(`${chalk.red('[ERROR]')} Error reading wallets.txt: ${err.message}`);
+        process.exit(1);
     }
-    
-    // Log the error but continue execution
-    console.log(chalk.yellow('⚠️ Usage report issue, continuing execution...'));
-  }
 }
 
-function loadWalletsFromFile() {
-  try {
-    return fs.readFileSync('wallets.txt', 'utf-8')
-      .split('\n')
-      .filter(wallet => wallet.trim())
-      .map(wallet => wallet.trim().toLowerCase());
-  } catch (error) {
-    console.error(chalk.red('⚠️ Error: wallets.txt not found'));
-    return [];
-  }
+async function loadProxies() {
+    try {
+        const data = await fs.readFile('proxies.txt', 'utf8');
+        return data.split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('#'))
+            .map(proxy => {
+                if (proxy.includes('://')) {
+                    const url = new URL(proxy);
+                    const protocol = url.protocol.replace(':', '');
+                    const auth = url.username ? `${url.username}:${url.password}` : '';
+                    const host = url.hostname;
+                    const port = url.port;
+                    return { protocol, host, port, auth };
+                } else {
+                    const parts = proxy.split(':');
+                    let [protocol, host, port, user, pass] = parts;
+                    protocol = protocol.replace('//', '');
+                    const auth = user && pass ? `${user}:${pass}` : '';
+                    return { protocol, host, port, auth };
+                }
+            });
+    } catch (err) {
+        console.log(`${chalk.yellow('[INFO]')} No proxy.txt found or error reading file. Using direct connection.`);
+        return [];
+    }
 }
 
-async function processAgentCycle(wallet, agentId, agentName, useProxy) {
-  try {
-    const proxy = useProxy ? getNextProxy() : null;
-    const axiosInstance = createAxiosInstance(proxy);
-
-    if (proxy) {
-      console.log(chalk.blue(`🌐 Using proxy: ${proxy}`));
-    }
-
-    const nanya = await sendRandomQuestion(agentId, axiosInstance);
+function createAgent(proxy) {
+    if (!proxy) return null;
     
-    if (nanya) {
-      console.log(chalk.cyan('❓ Question:'), chalk.bold(nanya.question));
-      console.log(chalk.green('💡 Answer:'), chalk.italic(nanya?.response?.content ?? ''));
-
-      await reportUsage(wallet, {
-        agent_id: agentId,
-        question: nanya.question,
-        response: nanya?.response?.content ?? 'No answer'
-      });
-    }
-  } catch (error) {
-    console.error(chalk.red('⚠️ Error in agent cycle:'), error.message);
-  }
+    const { protocol, host, port, auth } = proxy;
+    const authString = auth ? `${auth}@` : '';
+    const proxyUrl = `${protocol}://${authString}${host}:${port}`;
+    
+    return protocol.startsWith('socks') 
+        ? new SocksProxyAgent(proxyUrl)
+        : new HttpsProxyAgent(proxyUrl);
 }
 
-async function startContinuousProcess(wallet, useProxy) {
-  console.log(chalk.blue(`\n📌 Processing wallet: ${wallet}`));
-  console.log(chalk.yellow('Press Ctrl+C to stop the script\n'));
+const AI_ENDPOINTS = {
+    "https://deployment-uu9y1z4z85rapgwkss1muuiz.stag-vxzy.zettablock.com/main": {
+        "agent_id": "deployment_UU9y1Z4Z85RAPGwkss1mUUiZ",
+        "name": "Kite AI Assistant",
+        "questions": [
+            "Tell me about the latest updates in Kite AI",
+            "What are the upcoming features in Kite AI?",
+            "How can Kite AI improve my development workflow?",
+            "What makes Kite AI unique in the market?",
+            "How does Kite AI handle code completion?",
+            "Can you explain Kite AI's machine learning capabilities?",
+            "What programming languages does Kite AI support best?",
+            "How does Kite AI integrate with different IDEs?",
+            "What are the advanced features of Kite AI?",
+            "How can I optimize my use of Kite AI?"
+        ]
+    },
+    "https://deployment-ecz5o55dh0dbqagkut47kzyc.stag-vxzy.zettablock.com/main": {
+        "agent_id": "deployment_ECz5O55dH0dBQaGKuT47kzYC",
+        "name": "Crypto Price Assistant",
+        "questions": [
+            "What's the current market sentiment for Solana?",
+            "Analyze Bitcoin's price movement in the last hour",
+            "Compare ETH and BTC performance today",
+            "Which altcoins are showing bullish patterns?",
+            "Market analysis for top 10 cryptocurrencies",
+            "Technical analysis for Polkadot",
+            "Price movement patterns for Avalanche",
+            "Polygon's market performance analysis",
+            "Latest developments affecting BNB price",
+            "Cardano's market outlook"
+        ]
+    },
+    "https://deployment-sofftlsf9z4fya3qchykaanq.stag-vxzy.zettablock.com/main": {
+        "agent_id": "deployment_SoFftlsf9z4fyA3QCHYkaANq",
+        "name": "Transaction Analyzer",
+        "questions": []
+    }
+};
 
-  let cycleCount = 1;
+class WalletStatistics {
+    constructor() {
+        this.agentInteractions = {};
+        for (const endpoint in AI_ENDPOINTS) {
+            this.agentInteractions[AI_ENDPOINTS[endpoint].name] = 0;
+        }
+        this.totalPoints = 0;
+        this.totalInteractions = 0;
+        this.lastInteractionTime = null;
+        this.successfulInteractions = 0;
+        this.failedInteractions = 0;
+    }
+}
 
-  while (isRunning) {
-    console.log(chalk.magenta(`\n🔄 Cycle #${cycleCount}`));
-    console.log(chalk.dim('----------------------------------------'));
-
-    for (const [agentId, agentName] of Object.entries(agents)) {
-      if (!isRunning) break;
-      
-      console.log(chalk.magenta(`\n🤖 Using Agent: ${agentName}`));
-      await processAgentCycle(wallet, agentId, agentName, useProxy);
-      
-      if (isRunning) {
-        console.log(chalk.yellow(`⏳ Waiting ${rateLimitConfig.intervalBetweenCycles/1000} seconds before next interaction...`));
-        await sleep(rateLimitConfig.intervalBetweenCycles);
-      }
+class WalletSession {
+    constructor(walletAddress, sessionId) {
+        this.walletAddress = walletAddress;
+        this.sessionId = sessionId;
+        this.dailyPoints = 0;
+        this.startTime = new Date();
+        this.nextResetTime = new Date(this.startTime.getTime() + 24 * 60 * 60 * 1000);
+        this.statistics = new WalletStatistics();
     }
 
-    cycleCount++;
-    console.log(chalk.dim('----------------------------------------'));
-  }
+    updateStatistics(agentName, success = true) {
+        this.statistics.agentInteractions[agentName]++;
+        this.statistics.totalInteractions++;
+        this.statistics.lastInteractionTime = new Date();
+        if (success) {
+            this.statistics.successfulInteractions++;
+            this.statistics.totalPoints += 10; // Points per successful interaction
+        } else {
+            this.statistics.failedInteractions++;
+        }
+    }
+
+    printStatistics() {
+        console.log(`\n${chalk.blue(`[Session ${this.sessionId}]`)} ${chalk.green(`[${this.walletAddress}]`)} ${chalk.cyan('📊 Current Statistics')}`);
+        console.log(`${chalk.yellow('════════════════════════════════════════════')}`);
+        console.log(`${chalk.cyan('💰 Total Points:')} ${chalk.green(this.statistics.totalPoints)}`);
+        console.log(`${chalk.cyan('🔄 Total Interactions:')} ${chalk.green(this.statistics.totalInteractions)}`);
+        console.log(`${chalk.cyan('✅ Successful:')} ${chalk.green(this.statistics.successfulInteractions)}`);
+        console.log(`${chalk.cyan('❌ Failed:')} ${chalk.red(this.statistics.failedInteractions)}`);
+        console.log(`${chalk.cyan('⏱️ Last Interaction:')} ${chalk.yellow(this.statistics.lastInteractionTime?.toISOString() || 'Never')}`);
+        
+        console.log(`\n${chalk.cyan('🤖 Agent Interactions:')}`);
+        for (const [agentName, count] of Object.entries(this.statistics.agentInteractions)) {
+            console.log(`   ${chalk.yellow(agentName)}: ${chalk.green(count)}`);
+        }
+        console.log(chalk.yellow('════════════════════════════════════════════\n'));
+    }
+}
+
+class KiteAIAutomation {
+    constructor(walletAddress, proxyList = [], sessionId) {
+        this.session = new WalletSession(walletAddress, sessionId);
+        this.proxyList = proxyList;
+        this.currentProxyIndex = 0;
+        this.MAX_DAILY_POINTS = 230; // Updated: 23 interactions per 24 hours (23 x 10 points)
+        this.POINTS_PER_INTERACTION = 10;
+        this.MAX_DAILY_INTERACTIONS = this.MAX_DAILY_POINTS / this.POINTS_PER_INTERACTION;
+        this.isRunning = true;
+    }
+
+    getCurrentProxy() {
+        if (this.proxyList.length === 0) return null;
+        return this.proxyList[this.currentProxyIndex];
+    }
+
+    rotateProxy() {
+        if (this.proxyList.length === 0) return null;
+        this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxyList.length;
+        const proxy = this.getCurrentProxy();
+        this.logMessage('🔄', `Rotating to proxy: ${proxy.protocol}://${proxy.host}:${proxy.port}`, 'cyan');
+        return proxy;
+    }
+
+    logMessage(emoji, message, color = 'white') {
+        const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        const sessionPrefix = chalk.blue(`[Session ${this.session.sessionId}]`);
+        const walletPrefix = chalk.green(`[${this.session.walletAddress.slice(0, 6)}...]`);
+        console.log(`${chalk.yellow(`[${timestamp}]`)} ${sessionPrefix} ${walletPrefix} ${chalk[color](`${emoji} ${message}`)}`);
+    }
+
+    resetDailyPoints() {
+        const currentTime = new Date();
+        if (currentTime >= this.session.nextResetTime) {
+            this.logMessage('✨', 'Starting new 24-hour reward period', 'green');
+            this.session.dailyPoints = 0;
+            this.session.nextResetTime = new Date(currentTime.getTime() + 24 * 60 * 60 * 1000);
+            return true;
+        }
+        return false;
+    }
+
+    async shouldWaitForNextReset() {
+        if (this.session.dailyPoints >= this.MAX_DAILY_POINTS) {
+            const waitSeconds = (this.session.nextResetTime - new Date()) / 1000;
+            if (waitSeconds > 0) {
+                this.logMessage('🎯', `Maximum daily points (${this.MAX_DAILY_POINTS}) reached`, 'yellow');
+                this.logMessage('⏳', `Next reset: ${this.session.nextResetTime.toISOString().replace('T', ' ').slice(0, 19)}`, 'yellow');
+                await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+                this.resetDailyPoints();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    async getRecentTransactions() {
+        this.logMessage('🔍', 'Scanning recent transactions...', 'white');
+        const url = 'https://testnet.kitescan.ai/api/v2/advanced-filters';
+        const params = new URLSearchParams({
+            transaction_types: 'coin_transfer',
+            age: '5m'
+        });
+
+        try {
+            const agent = createAgent(this.getCurrentProxy());
+            const response = await fetch(`${url}?${params}`, {
+                agent,
+                headers: {
+                    'accept': '*/*',
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+            const data = await response.json();
+            const hashes = data.items?.map(item => item.hash) || [];
+            this.logMessage('📊', `Found ${hashes.length} recent transactions`, 'magenta');
+            return hashes;
+        } catch (e) {
+            this.logMessage('❌', `Transaction fetch error: ${e}`, 'red');
+            this.rotateProxy();
+            return [];
+        }
+    }
+
+    async sendAiQuery(endpoint, message) {
+        const agent = createAgent(this.getCurrentProxy());
+        const headers = {
+            'Accept': 'text/event-stream',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        };
+        const data = {
+            message,
+            stream: true
+        };
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                agent,
+                headers,
+                body: JSON.stringify(data)
+            });
+
+            const sessionPrefix = chalk.blue(`[Session ${this.session.sessionId}]`);
+            const walletPrefix = chalk.green(`[${this.session.walletAddress.slice(0, 6)}...]`);
+            process.stdout.write(`${sessionPrefix} ${walletPrefix} ${chalk.cyan('🤖 AI Response: ')}`);
+            
+            let accumulatedResponse = "";
+
+            for await (const chunk of response.body) {
+                const lines = chunk.toString().split('\n');
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const jsonStr = line.slice(6);
+                            if (jsonStr === '[DONE]') break;
+
+                            const jsonData = JSON.parse(jsonStr);
+                            const content = jsonData.choices?.[0]?.delta?.content || '';
+                            if (content) {
+                                accumulatedResponse += content;
+                                process.stdout.write(chalk.magenta(content));
+                            }
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                }
+            }
+            console.log();
+            return accumulatedResponse.trim();
+        } catch (e) {
+            this.logMessage('❌', `AI query error: ${e}`, 'red');
+            this.rotateProxy();
+            return "";
+        }
+    }
+
+    async reportUsage(endpoint, message, response) {
+        this.logMessage('📝', 'Recording interaction...', 'white');
+        const url = 'https://quests-usage-dev.prod.zettablock.com/api/report_usage';
+        const data = {
+            wallet_address: this.session.walletAddress,
+            agent_id: AI_ENDPOINTS[endpoint].agent_id,
+            request_text: message,
+            response_text: response,
+            request_metadata: {}
+        };
+
+        try {
+            const agent = createAgent(this.getCurrentProxy());
+            const result = await fetch(url, {
+                method: 'POST',
+                agent,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                },
+                body: JSON.stringify(data)
+            });
+            return result.status === 200;
+        } catch (e) {
+            this.logMessage('❌', `Usage report error: ${e}`, 'red');
+            this.rotateProxy();
+            return false;
+        }
+    }
+
+    async run() {
+        this.logMessage('🚀', 'Initializing Kite AI Auto-Interaction System', 'green');
+        this.logMessage('💼', `Wallet: ${this.session.walletAddress}`, 'cyan');
+        this.logMessage('🎯', `Daily Target: ${this.MAX_DAILY_POINTS} points (${this.MAX_DAILY_INTERACTIONS} interactions)`, 'cyan');
+        this.logMessage('⏰', `Next Reset: ${this.session.nextResetTime.toISOString().replace('T', ' ').slice(0, 19)}`, 'cyan');
+        
+        if (this.proxyList.length > 0) {
+            this.logMessage('🌐', `Loaded ${this.proxyList.length} proxies`, 'cyan');
+        } else {
+            this.logMessage('🌐', 'Running in direct connection mode', 'yellow');
+        }
+
+        let interactionCount = 0;
+        try {
+            while (this.isRunning) {
+                this.resetDailyPoints();
+                await this.shouldWaitForNextReset();
+
+                interactionCount++;
+                console.log(`\n${chalk.blue(`[Session ${this.session.sessionId}]`)} ${chalk.green(`[${this.session.walletAddress}]`)} ${chalk.cyan('═'.repeat(60))}`);
+                this.logMessage('🔄', `Interaction #${interactionCount}`, 'magenta');
+                this.logMessage('📈', `Progress: ${this.session.dailyPoints + this.POINTS_PER_INTERACTION}/${this.MAX_DAILY_POINTS} points`, 'cyan');
+                this.logMessage('⏳', `Next Reset: ${this.session.nextResetTime.toISOString().replace('T', ' ').slice(0, 19)}`, 'cyan');
+
+                const transactions = await this.getRecentTransactions();
+                AI_ENDPOINTS["https://deployment-sofftlsf9z4fya3qchykaanq.stag-vxzy.zettablock.com/main"].questions = 
+                    transactions.map(tx => `Analyze this transaction in detail: ${tx}`);
+
+                const endpoints = Object.keys(AI_ENDPOINTS);
+                const endpoint = endpoints[Math.floor(Math.random() * endpoints.length)];
+                const questions = AI_ENDPOINTS[endpoint].questions;
+                const question = questions[Math.floor(Math.random() * questions.length)];
+
+                this.logMessage('🤖', `AI System: ${AI_ENDPOINTS[endpoint].name}`, 'cyan');
+                this.logMessage('🔑', `Agent ID: ${AI_ENDPOINTS[endpoint].agent_id}`, 'cyan');
+                this.logMessage('❓', `Query: ${question}`, 'cyan');
+
+                const response = await this.sendAiQuery(endpoint, question);
+                let interactionSuccess = false;
+
+                if (await this.reportUsage(endpoint, question, response)) {
+                    this.logMessage('✅', 'Interaction successfully recorded', 'green');
+                    this.session.dailyPoints += this.POINTS_PER_INTERACTION;
+                    interactionSuccess = true;
+                } else {
+                    this.logMessage('⚠️', 'Interaction recording failed', 'red');
+                }
+
+                // Update statistics for this interaction
+                this.session.updateStatistics(AI_ENDPOINTS[endpoint].name, interactionSuccess);
+                
+                // Display current statistics after each interaction
+                this.session.printStatistics();
+
+                // Fixed cooldown: 1.3 minutes (78 seconds) delay between messages
+                const delay = 78;
+                this.logMessage('⏳', `Cooldown: ${delay} seconds...`, 'yellow');
+                await new Promise(resolve => setTimeout(resolve, delay * 1000));
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                this.logMessage('🛑', 'Process terminated by user', 'yellow');
+            } else {
+                this.logMessage('❌', `Error: ${e}`, 'red');
+            }
+        }
+    }
+
+    stop() {
+        this.isRunning = false;
+    }
 }
 
 async function main() {
-  displayAppTitle();
-
-  const askMode = () => {
-    return new Promise((resolve) => {
-      readline.question(chalk.yellow('🔄 Choose connection mode (1: Direct, 2: Proxy): '), resolve);
-    });
-  };
-
-  const askWalletMode = () => {
-    return new Promise((resolve) => {
-      console.log(chalk.yellow('\n📋 Choose wallet mode:'));
-      console.log(chalk.yellow('1. Manual input'));
-      console.log(chalk.yellow('2. Load from wallets.txt'));
-      readline.question(chalk.yellow('\nYour choice: '), resolve);
-    });
-  };
-
-  const askWallet = () => {
-    return new Promise((resolve) => {
-      readline.question(chalk.yellow('🔑 Enter wallet address: '), resolve);
-    });
-  };
-
-  try {
-    const mode = await askMode();
-    proxyConfig.enabled = mode === '2';
+    console.clear();
     
-    if (proxyConfig.enabled) {
-      loadProxiesFromFile();
+    // Display initial registration message
+    console.log(`${chalk.cyan('📝 Register First:')} ${chalk.green('https://testnet.gokite.ai?r=kxsQ3byj')}`);
+    console.log(`${chalk.yellow('💡 Join our channel if you got any problem')}\n`);
+    console.log(chalk.magenta('Press any key to continue...'));
+    
+    await waitForKeyPress();
+    console.clear();
+    
+    console.log(banner);
+    
+    // Load wallets and proxies
+    const wallets = await loadWallets();
+    const proxyList = await loadProxies();
+    
+    console.log(`${chalk.cyan('📊 Loaded:')} ${chalk.green(wallets.length)} wallets and ${chalk.green(proxyList.length)} proxies\n`);
+    
+    // Create instances for each wallet with unique session IDs
+    const instances = wallets.map((wallet, index) => 
+        new KiteAIAutomation(wallet, proxyList, index + 1)
+    );
+    
+    // Display initial statistics header
+    console.log(chalk.cyan('\n════════════════════════'));
+    console.log(chalk.cyan('🤖 Starting All Sessions'));
+    console.log(chalk.cyan('════════════════════════\n'));
+    
+    // Run all instances
+    try {
+        await Promise.all(instances.map(instance => instance.run()));
+    } catch (error) {
+        console.log(`\n${chalk.red('❌ Fatal error:')} ${error.message}`);
     }
-    
-    const walletMode = await askWalletMode();
-    let wallets = [];
-    
-    if (walletMode === '2') {
-      wallets = loadWalletsFromFile();
-      if (wallets.length === 0) {
-        console.log(chalk.red('❌ No wallets loaded. Stopping program.'));
-        readline.close();
-        return;
-      }
-    } else {
-      const wallet = await askWallet();
-      wallets = [wallet.toLowerCase()];
-    }
-
-    for (const wallet of wallets) {
-      await startContinuousProcess(wallet, proxyConfig.enabled);
-    }
-    
-  } catch (error) {
-    console.error(chalk.red('⚠️ An error occurred:'), error);
-    readline.close();
-  }
 }
 
-main();
+// Handle process termination
+process.on('SIGINT', () => {
+    console.log(`\n${chalk.yellow('🛑 Gracefully shutting down...')}`);
+    process.exit(0);
+});
+
+// Global error handler
+process.on('unhandledRejection', (error) => {
+    console.error(`\n${chalk.red('❌ Unhandled rejection:')} ${error.message}`);
+});
+
+main().catch(error => {
+    console.error(`\n${chalk.red('❌ Fatal error:')} ${error.message}`);
+    process.exit(1);
+});
