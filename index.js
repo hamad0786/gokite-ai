@@ -1,7 +1,46 @@
-const axios = require('axios');
-const fs = require('fs');
-const figlet = require('figlet');
-const chalk = require('chalk');
+// Import dependencies using ES module syntax
+import chalk from 'chalk';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import { createInterface } from 'readline';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { HttpProxyAgent } from 'http-proxy-agent';
+import axios from 'axios';
+import fs from 'fs';
+import { banner } from './banner.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const readline = createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+// Rate Limiting Configuration
+const rateLimitConfig = {
+  maxRetries: 5,
+  baseDelay: 2000,
+  maxDelay: 10000,
+  requestsPerMinute: 15,
+  // Modified: intervalBetweenCycles set to 30000 ms (30 seconds)
+  intervalBetweenCycles: 30000,
+  walletVerificationRetries: 3
+};
+
+let lastRequestTime = Date.now();
+let isRunning = true;
+
+// Handle CTRL+C to gracefully stop the script
+process.on('SIGINT', () => {
+  console.log(chalk.yellow('\n\n🛑 Stopping the script gracefully...'));
+  isRunning = false;
+  setTimeout(() => {
+    console.log(chalk.green('👋 Thank you for using Kite AI!'));
+    process.exit(0);
+  }, 1000);
+});
 
 const agents = {
   "deployment_p5J9lz1Zxe7CYEoo0TZpRVay": "Professor 🧠",
@@ -9,52 +48,138 @@ const agents = {
   "deployment_SoFftlsf9z4fyA3QCHYkaANq": "Sherlock 🔎"
 };
 
-function displayAppTitle() {
-  console.log(chalk.cyan(figlet.textSync(' DARK LIFE ', { horizontalLayout: 'full' })));
-  console.log(chalk.dim('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-  console.log(chalk.gray('By HAMAD 🧬 Join Tg - https://t.me/HAMAD_ALPHA'));
-  console.log(chalk.dim('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
-}
+const proxyConfig = {
+  enabled: false,
+  current: 'direct',
+  proxies: []
+};
 
-async function sendRandomQuestion(agent) {
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const calculateDelay = (attempt) => {
+  return Math.min(
+    rateLimitConfig.maxDelay,
+    rateLimitConfig.baseDelay * Math.pow(2, attempt)
+  );
+};
+
+// Modified to use correct endpoint and handle specific error cases
+async function verifyWallet(wallet) {
   try {
-    const randomQuestions = JSON.parse(fs.readFileSync('random_questions.json', 'utf-8'));
-    const randomQuestion = randomQuestions[Math.floor(Math.random() * randomQuestions.length)];
-
-    const payload = { message: randomQuestion, stream: false };
-    let retries = 3;
-
-    while (retries > 0) {
-      try {
-        const response = await axios.post(
-          `https://${agent.toLowerCase().replace('_','-')}.stag-vxzy.zettablock.com/main`,
-          payload,
-          { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
-        );
-
-        return { question: randomQuestion, response: response.data.choices[0].message };
-      } catch (error) {
-        if (error.response && error.response.status === 504) {
-          console.log(chalk.yellow(`⚠️ 504 Gateway Timeout - Retrying (${4 - retries}/3)...`));
-          retries--;
-          await new Promise(resolve => setTimeout(resolve, 5000)); // 5 sec delay before retry
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    console.log(chalk.red(`❌ Failed after 3 retries.`));
-    return { question: randomQuestion, response: { content: "No response due to timeout." } };
-
+    // Skip wallet verification and proceed with usage reporting
+    return true;
   } catch (error) {
-    console.error(chalk.red('⚠️ Error:'), error.message);
-    return { question: "Unknown", response: { content: "Error fetching question." } };
+    console.log(chalk.yellow('⚠️ Proceeding without wallet verification...'));
+    return true;
   }
 }
 
-async function reportUsage(wallet, options) {
+const checkRateLimit = async () => {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  const minimumInterval = (60000 / rateLimitConfig.requestsPerMinute);
+
+  if (timeSinceLastRequest < minimumInterval) {
+    const waitTime = minimumInterval - timeSinceLastRequest;
+    await sleep(waitTime);
+  }
+  
+  lastRequestTime = Date.now();
+};
+
+function loadProxiesFromFile() {
   try {
+    const proxyList = fs.readFileSync('proxies.txt', 'utf-8')
+      .split('\n')
+      .filter(line => line.trim())
+      .map(proxy => proxy.trim());
+    proxyConfig.proxies = proxyList;
+    console.log(chalk.green(`✅ Successfully loaded ${proxyList.length} proxies from file`));
+  } catch (error) {
+    console.log(chalk.yellow('⚠️ proxies.txt not found or empty. Using direct connection.'));
+  }
+}
+
+function getNextProxy() {
+  if (!proxyConfig.enabled || proxyConfig.proxies.length === 0) {
+    return null;
+  }
+  const proxy = proxyConfig.proxies.shift();
+  proxyConfig.proxies.push(proxy);
+  return proxy;
+}
+
+function createProxyAgent(proxyUrl) {
+  try {
+    if (!proxyUrl) return null;
+
+    if (proxyUrl.startsWith('socks')) {
+      return new SocksProxyAgent(proxyUrl);
+    } else if (proxyUrl.startsWith('http')) {
+      return {
+        https: new HttpsProxyAgent(proxyUrl),
+        http: new HttpProxyAgent(proxyUrl)
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(chalk.red(`⚠️ Error creating proxy agent: ${error.message}`));
+    return null;
+  }
+}
+
+function createAxiosInstance(proxyUrl = null) {
+  const config = {
+    headers: { 'Content-Type': 'application/json' }
+  };
+
+  if (proxyUrl) {
+    const proxyAgent = createProxyAgent(proxyUrl);
+    if (proxyAgent) {
+      if (proxyAgent.https) {
+        config.httpsAgent = proxyAgent.https;
+        config.httpAgent = proxyAgent.http;
+      } else {
+        config.httpsAgent = proxyAgent;
+        config.httpAgent = proxyAgent;
+      }
+    }
+  }
+
+  return axios.create(config);
+}
+
+function displayAppTitle() {
+  console.log(banner);
+  console.log(chalk.dim('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+  console.log(chalk.yellow('Made with ❣️ by: HAMAD                   '));
+  console.log(chalk.dim('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+}
+
+async function sendRandomQuestion(agent, axiosInstance) {
+  try {
+    await checkRateLimit();
+    
+    const randomQuestions = JSON.parse(fs.readFileSync('questions.json', 'utf-8'));
+    const randomQuestion = randomQuestions[Math.floor(Math.random() * randomQuestions.length)];
+
+    const payload = { message: randomQuestion, stream: false };
+    const response = await axiosInstance.post(
+      `https://${agent.toLowerCase().replace('_','-')}.stag-vxzy.zettablock.com/main`,
+      payload
+    );
+
+    return { question: randomQuestion, response: response.data.choices[0].message };
+  } catch (error) {
+    console.error(chalk.red('⚠️ Error:'), error.response ? error.response.data : error.message);
+    return null;
+  }
+}
+
+async function reportUsage(wallet, options, retryCount = 0) {
+  try {
+    await checkRateLimit();
+
     const payload = {
       wallet_address: wallet,
       agent_id: options.agent_id,
@@ -67,63 +192,168 @@ async function reportUsage(wallet, options) {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    console.log(chalk.green('✅ Usage data successfully reported!\n'));
+    console.log(chalk.green('✅ Usage data reported successfully!\n'));
   } catch (error) {
-    console.error(chalk.red('⚠️ Failed to report usage:'), error.message);
+    const isRateLimit = error.response?.data?.error?.includes('Rate limit exceeded');
+    
+    if (isRateLimit && retryCount < rateLimitConfig.maxRetries) {
+      const delay = calculateDelay(retryCount);
+      console.log(chalk.yellow(`⏳ Rate limit detected, retrying in ${delay/1000} seconds...`));
+      await sleep(delay);
+      return reportUsage(wallet, options, retryCount + 1);
+    }
+    
+    // Log the error but continue execution
+    console.log(chalk.yellow('⚠️ Usage report issue, continuing execution...'));
+  }
+}
+
+function loadWalletsFromFile() {
+  try {
+    return fs.readFileSync('wallets.txt', 'utf-8')
+      .split('\n')
+      .filter(wallet => wallet.trim())
+      .map(wallet => wallet.trim().toLowerCase());
+  } catch (error) {
+    console.error(chalk.red('⚠️ Error: wallets.txt not found'));
+    return [];
+  }
+}
+
+async function processAgentCycle(wallet, agentId, agentName, useProxy) {
+  try {
+    const proxy = useProxy ? getNextProxy() : null;
+    const axiosInstance = createAxiosInstance(proxy);
+
+    if (proxy) {
+      console.log(chalk.blue(`🌐 Using proxy: ${proxy}`));
+    }
+
+    const nanya = await sendRandomQuestion(agentId, axiosInstance);
+    
+    if (nanya) {
+      console.log(chalk.cyan('❓ Question:'), chalk.bold(nanya.question));
+      console.log(chalk.green('💡 Answer:'), chalk.italic(nanya?.response?.content ?? ''));
+
+      await reportUsage(wallet, {
+        agent_id: agentId,
+        question: nanya.question,
+        response: nanya?.response?.content ?? 'No answer'
+      });
+    }
+  } catch (error) {
+    console.error(chalk.red('⚠️ Error in agent cycle:'), error.message);
+  }
+}
+
+// Modified startContinuousProcess function to limit each wallet to max 23 messages per 24 hours
+async function startContinuousProcess(wallet, useProxy) {
+  console.log(chalk.blue(`\n📌 Processing wallet: ${wallet}`));
+  console.log(chalk.yellow('Press Ctrl+C to stop the script\n'));
+
+  let cycleCount = 1;
+  let messageCount = 0;
+  let periodStart = Date.now();
+
+  while (isRunning) {
+    // Reset count if 24 hours have passed
+    if (Date.now() - periodStart >= 24 * 60 * 60 * 1000) {
+      messageCount = 0;
+      periodStart = Date.now();
+      console.log(chalk.green(`⏰ 24-hour period reset for wallet: ${wallet}`));
+    }
+
+    // If max messages reached, wait until the 24-hour period resets
+    if (messageCount >= 23) {
+      const waitTime = (24 * 60 * 60 * 1000) - (Date.now() - periodStart);
+      console.log(chalk.yellow(`⚠️ Wallet ${wallet} reached maximum of 23 messages. Waiting ${Math.ceil(waitTime/1000)} seconds until reset...`));
+      await sleep(waitTime);
+      messageCount = 0;
+      periodStart = Date.now();
+      console.log(chalk.green(`⏰ 24-hour period reset for wallet: ${wallet}`));
+    }
+
+    console.log(chalk.magenta(`\n🔄 Cycle #${cycleCount}`));
+    console.log(chalk.dim('----------------------------------------'));
+
+    for (const [agentId, agentName] of Object.entries(agents)) {
+      if (!isRunning) break;
+      
+      // Check before sending each message
+      if (messageCount >= 23) {
+        break;
+      }
+      
+      console.log(chalk.magenta(`\n🤖 Using Agent: ${agentName}`));
+      await processAgentCycle(wallet, agentId, agentName, useProxy);
+      messageCount++; // Increment message count for each message sent
+      
+      if (isRunning) {
+        console.log(chalk.yellow(`⏳ Waiting ${rateLimitConfig.intervalBetweenCycles/1000} seconds before next interaction...`));
+        await sleep(rateLimitConfig.intervalBetweenCycles);
+      }
+    }
+
+    cycleCount++;
+    console.log(chalk.dim('----------------------------------------'));
   }
 }
 
 async function main() {
   displayAppTitle();
 
-  if (!fs.existsSync('nano_wallets.txt')) {
-    console.error(chalk.red('⚠️ Error: nano_wallets.txt file not found!'));
-    return;
-  }
+  const askMode = () => {
+    return new Promise((resolve) => {
+      readline.question(chalk.yellow('🔄 Choose connection mode (1: Direct, 2: Proxy): '), resolve);
+    });
+  };
 
-  const wallets = fs.readFileSync('nano_wallets.txt', 'utf-8').split('\n').map(addr => addr.trim()).filter(addr => addr);
-  if (wallets.length === 0) {
-    console.error(chalk.red('⚠️ Error: No wallet addresses found in nano_wallets.txt!'));
-    return;
-  }
+  const askWalletMode = () => {
+    return new Promise((resolve) => {
+      console.log(chalk.yellow('\n📋 Choose wallet mode:'));
+      console.log(chalk.yellow('1. Manual input'));
+      console.log(chalk.yellow('2. Load from wallets.txt'));
+      readline.question(chalk.yellow('\nYour choice: '), resolve);
+    });
+  };
 
-  console.log(chalk.blue(`📌 ${wallets.length} wallet addresses loaded from nano_wallets.txt`));
+  const askWallet = () => {
+    return new Promise((resolve) => {
+      readline.question(chalk.yellow('🔑 Enter wallet address: '), resolve);
+    });
+  };
 
-  for (const wallet of wallets) {
-    console.log(chalk.yellow(`\n🚀 Processing wallet: ${wallet}`));
-
-    for (const [agentId, agentName] of Object.entries(agents)) {
-      console.log(chalk.magenta(`\n🤖 Using Agent: ${agentName}`));
-      console.log(chalk.dim('----------------------------------------'));
-
-      for (let i = 0; i < 23; i++) {
-        console.log(chalk.yellow(`🔄 Iteration-${i + 1} for ${wallet}`));
-
-        const nanya = await sendRandomQuestion(agentId);
-
-        if (!nanya.question) {
-          console.log(chalk.red("⚠️ Skipping due to error fetching question."));
-          continue;
-        }
-
-        console.log(chalk.cyan('❓ Query:'), chalk.bold(nanya.question));
-        console.log(chalk.green('💡 Answer:'), chalk.italic(nanya?.response?.content ?? ''));
-
-        await reportUsage(wallet.toLowerCase(), {
-          agent_id: agentId,
-          question: nanya.question,
-          response: nanya?.response?.content ?? 'No response'
-        });
-
-        if (i < 22) {
-          await new Promise(resolve => setTimeout(resolve, 30000)); // 30 sec delay
-        }
-      }
-
-      console.log(chalk.dim('----------------------------------------'));
+  try {
+    const mode = await askMode();
+    proxyConfig.enabled = mode === '2';
+    
+    if (proxyConfig.enabled) {
+      loadProxiesFromFile();
     }
+    
+    const walletMode = await askWalletMode();
+    let wallets = [];
+    
+    if (walletMode === '2') {
+      wallets = loadWalletsFromFile();
+      if (wallets.length === 0) {
+        console.log(chalk.red('❌ No wallets loaded. Stopping program.'));
+        readline.close();
+        return;
+      }
+    } else {
+      const wallet = await askWallet();
+      wallets = [wallet.toLowerCase()];
+    }
+
+    for (const wallet of wallets) {
+      await startContinuousProcess(wallet, proxyConfig.enabled);
+    }
+    
+  } catch (error) {
+    console.error(chalk.red('⚠️ An error occurred:'), error);
+    readline.close();
   }
-  console.log(chalk.green('\n✅ All wallets processed successfully!'));
 }
 
 main();
